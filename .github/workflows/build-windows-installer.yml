@@ -2,7 +2,7 @@ name: Build Windows Installer
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'qoder/**']
     tags:
       - 'v*'
   pull_request:
@@ -17,12 +17,12 @@ on:
 
 env:
   VCPKG_DEFAULT_TRIPLET: x64-windows
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    
+    timeout-minutes: 60
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,72 +31,56 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
-      - name: Export GitHub Actions cache variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
+      - name: Install vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/packages
-          key: vcpkg-windows-${{ hashFiles('**/vcpkg.json') }}-v2
-          restore-keys: |
-            vcpkg-windows-
+          path: C:\vcpkg\installed
+          key: vcpkg-win-${{ hashFiles('vcpkg.json') }}-v3
+          restore-keys: vcpkg-win-
 
       - name: Install vcpkg dependencies
+        shell: pwsh
         run: |
-          vcpkg install sdl2:x64-windows
-          vcpkg install sdl2-image:x64-windows
-          vcpkg install sdl2-ttf:x64-windows
-          vcpkg install sdl2-gfx:x64-windows
-          vcpkg install boost-python:x64-windows
-          vcpkg install boost-filesystem:x64-windows
-          vcpkg install boost-thread:x64-windows
-          vcpkg install boost-system:x64-windows
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-
-      - name: Set VCPKG_ROOT environment variable
-        run: |
-          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
+          C:\vcpkg\vcpkg.exe install sdl2:x64-windows sdl2-image:x64-windows sdl2-ttf:x64-windows sdl2-gfx:x64-windows boost-python:x64-windows boost-filesystem:x64-windows boost-thread:x64-windows boost-system:x64-windows
 
       - name: Install Python dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install pyinstaller pygame opencv-python psutil numpy absl-py six "gym<=0.21.0"
+          python -m pip install pyinstaller pygame opencv-python psutil numpy absl-py six "gym<=0.21.0" cloudpickle
 
       - name: Build gfootball from source
+        shell: pwsh
+        env:
+          VCPKG_ROOT: C:\vcpkg
         run: |
           python -m pip install .
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
       - name: Verify gfootball installation
+        shell: pwsh
         run: |
           python -c "import gfootball; print('gfootball imported successfully')"
 
       - name: Create launcher script
+        shell: pwsh
         run: |
-          @"
+          $launcherContent = @'
           import sys
           import os
+
           if getattr(sys, 'frozen', False):
               application_path = os.path.dirname(sys.executable)
               os.chdir(application_path)
               sys.path.insert(0, application_path)
-          
+
           def main():
               try:
                   import gfootball.env as football_env
@@ -132,165 +116,110 @@ jobs:
                       env.close()
                   except:
                       pass
-          
+
           if __name__ == '__main__':
               main()
-          "@ | Out-File -FilePath launcher.py -Encoding utf8
+          '@
+          Set-Content -Path "launcher.py" -Value $launcherContent -Encoding UTF8
 
-      - name: Create PyInstaller spec file
+      - name: Create PyInstaller spec via Python
+        shell: pwsh
         run: |
-          python -c @"
-          import gfootball_engine
-          import gfootball
-          import os
-          
-          engine_path = os.path.dirname(gfootball_engine.__file__)
-          gfootball_path = os.path.dirname(gfootball.__file__)
-          
-          print(f'Engine path: {engine_path}')
-          print(f'GFootball path: {gfootball_path}')
-          
-          # Find all .pyd and .dll files
-          binaries = []
-          for f in os.listdir(engine_path):
-              if f.endswith('.pyd') or f.endswith('.dll'):
-                  binaries.append(f'(\"{os.path.join(engine_path, f)}\", \"gfootball_engine\")')
-          
-          spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
-          block_cipher = None
-          
-          a = Analysis(
-              ['launcher.py'],
-              pathex=[],
-              binaries=[{', '.join(binaries)}],
-              datas=[
-                  (r\"{os.path.join(engine_path, 'data')}\", \"gfootball_engine/data\"),
-                  (r\"{os.path.join(engine_path, 'fonts')}\", \"gfootball_engine/fonts\"),
-                  (r\"{os.path.join(gfootball_path, 'scenarios')}\", \"gfootball/scenarios\"),
-              ],
-              hiddenimports=['gfootball', 'gfootball.env', 'gfootball.scenarios', 'pygame', 'cv2', 'numpy', 'gym', 'psutil', 'six', 'absl'],
-              hookspath=[],
-              runtime_hooks=[],
-              excludes=[],
-              cipher=block_cipher,
-              noarchive=False,
-          )
-          
-          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-          
-          exe = EXE(
-              pyz,
-              a.scripts,
-              [],
-              exclude_binaries=True,
-              name='GFootball',
-              debug=False,
-              bootloader_ignore_signals=False,
-              strip=False,
-              upx=True,
-              console=True,
-              icon=None,
-          )
-          
-          coll = COLLECT(
-              exe,
-              a.binaries,
-              a.zipfiles,
-              a.datas,
-              strip=False,
-              upx=True,
-              name='gfootball',
-          )
-          '''
-          
-          with open('gfootball.spec', 'w') as f:
-              f.write(spec_content)
-          
-          print('Spec file created successfully')
-          "@
+          python create_pyinstaller_spec.py
 
       - name: Build with PyInstaller
+        shell: pwsh
         run: |
           pyinstaller gfootball.spec --clean --noconfirm
         continue-on-error: true
 
       - name: Copy additional data files
+        shell: pwsh
         run: |
           $enginePath = python -c "import gfootball_engine; import os; print(os.path.dirname(gfootball_engine.__file__))"
-          if (Test-Path "dist/gfootball") {
-            if (-not (Test-Path "dist/gfootball/gfootball_engine/data")) {
-              Copy-Item -Path "$enginePath/data" -Destination "dist/gfootball/gfootball_engine/data" -Recurse -Force
+          $enginePath = $enginePath.Trim()
+          if (Test-Path "dist\gfootball") {
+            $dataTarget = "dist\gfootball\gfootball_engine\data"
+            $fontsTarget = "dist\gfootball\gfootball_engine\fonts"
+            if (-not (Test-Path $dataTarget)) {
+              Copy-Item -Path "$enginePath\data" -Destination $dataTarget -Recurse -Force
             }
-            if (-not (Test-Path "dist/gfootball/gfootball_engine/fonts")) {
-              Copy-Item -Path "$enginePath/fonts" -Destination "dist/gfootball/gfootball_engine/fonts" -Recurse -Force
+            if (-not (Test-Path $fontsTarget)) {
+              Copy-Item -Path "$enginePath\fonts" -Destination $fontsTarget -Recurse -Force
             }
           }
         continue-on-error: true
 
       - name: Install NSIS
+        shell: pwsh
         run: |
           choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
       - name: Create NSIS installer script
+        shell: pwsh
         run: |
-          @"
+          $nsiContent = @'
           !include "MUI2.nsh"
-          
+
           Name "Google Research Football"
           OutFile "GFootball_Setup.exe"
-          InstallDir "`$PROGRAMFILES64\Google Research Football"
+          InstallDir "$PROGRAMFILES64\Google Research Football"
           RequestExecutionLevel admin
-          
+
           !define MUI_ABORTWARNING
-          
+
           !insertmacro MUI_PAGE_WELCOME
           !insertmacro MUI_PAGE_DIRECTORY
           !insertmacro MUI_PAGE_INSTFILES
           !insertmacro MUI_PAGE_FINISH
-          
+
           !insertmacro MUI_UNPAGE_CONFIRM
           !insertmacro MUI_UNPAGE_INSTFILES
-          
+
           !insertmacro MUI_LANGUAGE "English"
-          
+
           Section "Install"
-              SetOutPath "`$INSTDIR"
+              SetOutPath "$INSTDIR"
               File /r "dist\gfootball\*.*"
-              
-              CreateDirectory "`$SMPROGRAMS\Google Research Football"
-              CreateShortcut "`$SMPROGRAMS\Google Research Football\GFootball.lnk" "`$INSTDIR\GFootball.exe"
-              CreateShortcut "`$SMPROGRAMS\Google Research Football\Uninstall.lnk" "`$INSTDIR\uninstall.exe"
-              CreateShortcut "`$DESKTOP\Google Research Football.lnk" "`$INSTDIR\GFootball.exe"
-              
+
+              CreateDirectory "$SMPROGRAMS\Google Research Football"
+              CreateShortcut "$SMPROGRAMS\Google Research Football\GFootball.lnk" "$INSTDIR\GFootball.exe"
+              CreateShortcut "$SMPROGRAMS\Google Research Football\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+              CreateShortcut "$DESKTOP\Google Research Football.lnk" "$INSTDIR\GFootball.exe"
+
               WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "DisplayName" "Google Research Football"
-              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "UninstallString" "`$INSTDIR\uninstall.exe"
+              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "UninstallString" "$INSTDIR\uninstall.exe"
               WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "Publisher" "Google Research"
               WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "DisplayVersion" "2.10.3"
-              
-              WriteUninstaller "`$INSTDIR\uninstall.exe"
+
+              WriteUninstaller "$INSTDIR\uninstall.exe"
           SectionEnd
-          
+
           Section "Uninstall"
-              RMDir /r "`$INSTDIR"
-              RMDir /r "`$SMPROGRAMS\Google Research Football"
-              Delete "`$DESKTOP\Google Research Football.lnk"
+              RMDir /r "$INSTDIR"
+              RMDir /r "$SMPROGRAMS\Google Research Football"
+              Delete "$DESKTOP\Google Research Football.lnk"
               DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball"
           SectionEnd
-          "@ | Out-File -FilePath installer.nsi -Encoding utf8
+          '@
+          Set-Content -Path "installer.nsi" -Value $nsiContent -Encoding ASCII
 
       - name: Build NSIS installer
+        shell: pwsh
         run: |
-          if (Test-Path "dist/gfootball") {
-            makensis installer.nsi
+          if (Test-Path "dist\gfootball") {
+            & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
           } else {
-            Write-Host "PyInstaller build failed, creating portable zip instead"
+            Write-Host "PyInstaller dist not found, skipping NSIS"
           }
         continue-on-error: true
 
       - name: Create portable zip (fallback)
+        shell: pwsh
         run: |
-          if (Test-Path "dist/gfootball") {
-            Compress-Archive -Path "dist/gfootball/*" -DestinationPath "GFootball_Portable.zip"
+          if (Test-Path "dist\gfootball") {
+            Compress-Archive -Path "dist\gfootball\*" -DestinationPath "GFootball_Portable.zip"
           }
         continue-on-error: true
 
@@ -317,7 +246,7 @@ jobs:
     needs: build-windows
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
-    
+
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
