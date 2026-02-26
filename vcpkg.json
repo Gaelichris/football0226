@@ -1,0 +1,18 @@
+{
+  "name": "gfootball",
+  "version": "2.10.3",
+  "description": "Google Research Football - RL environment based on open-source game Gameplay Football",
+  "dependencies": [
+    "sdl2",
+    "sdl2-image",
+    "sdl2-ttf",
+    "sdl2-gfx",
+    {
+      "name": "boost-python",
+      "features": ["python3"]
+    },
+    "boost-filesystem",
+    "boost-thread",
+    "boost-system"
+  ]
+}

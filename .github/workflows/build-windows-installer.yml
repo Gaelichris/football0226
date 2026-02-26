@@ -1,0 +1,337 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub Release'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  VCPKG_DEFAULT_TRIPLET: x64-windows
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: vcpkg-windows-${{ hashFiles('**/vcpkg.json') }}-v2
+          restore-keys: |
+            vcpkg-windows-
+
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install sdl2:x64-windows
+          vcpkg install sdl2-image:x64-windows
+          vcpkg install sdl2-ttf:x64-windows
+          vcpkg install sdl2-gfx:x64-windows
+          vcpkg install boost-python:x64-windows
+          vcpkg install boost-filesystem:x64-windows
+          vcpkg install boost-thread:x64-windows
+          vcpkg install boost-system:x64-windows
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      - name: Set VCPKG_ROOT environment variable
+        run: |
+          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install pyinstaller pygame opencv-python psutil numpy absl-py six "gym<=0.21.0"
+
+      - name: Build gfootball from source
+        run: |
+          python -m pip install .
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      - name: Verify gfootball installation
+        run: |
+          python -c "import gfootball; print('gfootball imported successfully')"
+
+      - name: Create launcher script
+        run: |
+          @"
+          import sys
+          import os
+          if getattr(sys, 'frozen', False):
+              application_path = os.path.dirname(sys.executable)
+              os.chdir(application_path)
+              sys.path.insert(0, application_path)
+          
+          def main():
+              try:
+                  import gfootball.env as football_env
+                  env = football_env.create_environment(
+                      env_name='11_vs_11_easy_stochastic',
+                      render=True,
+                      representation='raw',
+                      number_of_left_players_agent_controls=1,
+                      stacked=False,
+                      write_video=False,
+                      write_full_episode_dumps=False,
+                      write_goal_dumps=False
+                  )
+                  print("Google Research Football")
+                  print("=" * 40)
+                  print("Controls: Arrow Keys=Move, S=Pass, D=Shoot, E=Sprint")
+                  print("Press Ctrl+C to quit")
+                  obs = env.reset()
+                  while True:
+                      action = 0
+                      obs, reward, done, info = env.step(action)
+                      if done:
+                          obs = env.reset()
+              except KeyboardInterrupt:
+                  print("\nGame ended")
+              except Exception as e:
+                  print(f"Error: {e}")
+                  import traceback
+                  traceback.print_exc()
+                  input("Press Enter to exit...")
+              finally:
+                  try:
+                      env.close()
+                  except:
+                      pass
+          
+          if __name__ == '__main__':
+              main()
+          "@ | Out-File -FilePath launcher.py -Encoding utf8
+
+      - name: Create PyInstaller spec file
+        run: |
+          python -c @"
+          import gfootball_engine
+          import gfootball
+          import os
+          
+          engine_path = os.path.dirname(gfootball_engine.__file__)
+          gfootball_path = os.path.dirname(gfootball.__file__)
+          
+          print(f'Engine path: {engine_path}')
+          print(f'GFootball path: {gfootball_path}')
+          
+          # Find all .pyd and .dll files
+          binaries = []
+          for f in os.listdir(engine_path):
+              if f.endswith('.pyd') or f.endswith('.dll'):
+                  binaries.append(f'(\"{os.path.join(engine_path, f)}\", \"gfootball_engine\")')
+          
+          spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
+          block_cipher = None
+          
+          a = Analysis(
+              ['launcher.py'],
+              pathex=[],
+              binaries=[{', '.join(binaries)}],
+              datas=[
+                  (r\"{os.path.join(engine_path, 'data')}\", \"gfootball_engine/data\"),
+                  (r\"{os.path.join(engine_path, 'fonts')}\", \"gfootball_engine/fonts\"),
+                  (r\"{os.path.join(gfootball_path, 'scenarios')}\", \"gfootball/scenarios\"),
+              ],
+              hiddenimports=['gfootball', 'gfootball.env', 'gfootball.scenarios', 'pygame', 'cv2', 'numpy', 'gym', 'psutil', 'six', 'absl'],
+              hookspath=[],
+              runtime_hooks=[],
+              excludes=[],
+              cipher=block_cipher,
+              noarchive=False,
+          )
+          
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+          
+          exe = EXE(
+              pyz,
+              a.scripts,
+              [],
+              exclude_binaries=True,
+              name='GFootball',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              console=True,
+              icon=None,
+          )
+          
+          coll = COLLECT(
+              exe,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              strip=False,
+              upx=True,
+              name='gfootball',
+          )
+          '''
+          
+          with open('gfootball.spec', 'w') as f:
+              f.write(spec_content)
+          
+          print('Spec file created successfully')
+          "@
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller gfootball.spec --clean --noconfirm
+        continue-on-error: true
+
+      - name: Copy additional data files
+        run: |
+          $enginePath = python -c "import gfootball_engine; import os; print(os.path.dirname(gfootball_engine.__file__))"
+          if (Test-Path "dist/gfootball") {
+            if (-not (Test-Path "dist/gfootball/gfootball_engine/data")) {
+              Copy-Item -Path "$enginePath/data" -Destination "dist/gfootball/gfootball_engine/data" -Recurse -Force
+            }
+            if (-not (Test-Path "dist/gfootball/gfootball_engine/fonts")) {
+              Copy-Item -Path "$enginePath/fonts" -Destination "dist/gfootball/gfootball_engine/fonts" -Recurse -Force
+            }
+          }
+        continue-on-error: true
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y
+
+      - name: Create NSIS installer script
+        run: |
+          @"
+          !include "MUI2.nsh"
+          
+          Name "Google Research Football"
+          OutFile "GFootball_Setup.exe"
+          InstallDir "`$PROGRAMFILES64\Google Research Football"
+          RequestExecutionLevel admin
+          
+          !define MUI_ABORTWARNING
+          
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+          
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+          
+          !insertmacro MUI_LANGUAGE "English"
+          
+          Section "Install"
+              SetOutPath "`$INSTDIR"
+              File /r "dist\gfootball\*.*"
+              
+              CreateDirectory "`$SMPROGRAMS\Google Research Football"
+              CreateShortcut "`$SMPROGRAMS\Google Research Football\GFootball.lnk" "`$INSTDIR\GFootball.exe"
+              CreateShortcut "`$SMPROGRAMS\Google Research Football\Uninstall.lnk" "`$INSTDIR\uninstall.exe"
+              CreateShortcut "`$DESKTOP\Google Research Football.lnk" "`$INSTDIR\GFootball.exe"
+              
+              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "DisplayName" "Google Research Football"
+              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "UninstallString" "`$INSTDIR\uninstall.exe"
+              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "Publisher" "Google Research"
+              WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball" "DisplayVersion" "2.10.3"
+              
+              WriteUninstaller "`$INSTDIR\uninstall.exe"
+          SectionEnd
+          
+          Section "Uninstall"
+              RMDir /r "`$INSTDIR"
+              RMDir /r "`$SMPROGRAMS\Google Research Football"
+              Delete "`$DESKTOP\Google Research Football.lnk"
+              DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GFootball"
+          SectionEnd
+          "@ | Out-File -FilePath installer.nsi -Encoding utf8
+
+      - name: Build NSIS installer
+        run: |
+          if (Test-Path "dist/gfootball") {
+            makensis installer.nsi
+          } else {
+            Write-Host "PyInstaller build failed, creating portable zip instead"
+          }
+        continue-on-error: true
+
+      - name: Create portable zip (fallback)
+        run: |
+          if (Test-Path "dist/gfootball") {
+            Compress-Archive -Path "dist/gfootball/*" -DestinationPath "GFootball_Portable.zip"
+          }
+        continue-on-error: true
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GFootball-Windows-Installer
+          path: |
+            GFootball_Setup.exe
+            GFootball_Portable.zip
+          if-no-files-found: warn
+
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs
+          path: |
+            build/
+            *.log
+          if-no-files-found: ignore
+
+  create-release:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: GFootball-Windows-Installer
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            GFootball_Setup.exe
+            GFootball_Portable.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
