@@ -42,10 +42,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel psutil
 
-      - name: Build and install gfootball
+      - name: Build and install gfootball (Debug)
         shell: pwsh
         env:
           VCPKG_ROOT: C:\vcpkg
+          BUILD_CONFIGURATION: Debug
         run: |
           python -m pip install .
 

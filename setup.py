@@ -109,7 +109,8 @@ class CustomBuild(build_ext):
     if os.system('gfootball\\build_game_engine.bat'):
       raise OSError('Google Research Football compilation failed.\n' + guide_message)
     # Copy compiled library and its dependencies
-    lib_path = 'third_party/gfootball_engine/build_win/Release/'
+    build_config = os.environ.get('BUILD_CONFIGURATION', 'Release')
+    lib_path = f'third_party/gfootball_engine/build_win/{build_config}/'
     libs = glob.glob(f'{lib_path}*.pyd') + glob.glob(f'{lib_path}*.dll')
     copy_compiled_libs(libs, dest_dir)
     copy_fonts(dest_dir)
