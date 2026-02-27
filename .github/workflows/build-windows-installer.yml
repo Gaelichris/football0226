@@ -15,6 +15,10 @@ on:
         default: 'false'
         type: boolean
 
+env:
+  # Enable debug logging for all steps
+  ACTIONS_STEP_DEBUG: true
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -29,35 +33,70 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Debug - Show environment info
+        shell: pwsh
+        run: |
+          Write-Host "=== System Info ==="
+          python --version
+          pip --version
+          cmake --version
+          Write-Host "=== Environment Variables ==="
+          Get-ChildItem Env: | Sort-Object Name | Format-Table -AutoSize
+          Write-Host "=== Disk Space ==="
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name,Used,Free -AutoSize
+
       # gfootball uses vcpkg manifest mode - CMake handles dependencies automatically
       - name: Install vcpkg
         shell: pwsh
         run: |
+          Write-Host "::group::Cloning vcpkg"
           git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          Write-Host "::endgroup::"
+          Write-Host "::group::Bootstrapping vcpkg"
           C:\vcpkg\bootstrap-vcpkg.bat
+          Write-Host "::endgroup::"
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
+          Write-Host "vcpkg installed at C:\vcpkg"
 
       - name: Upgrade pip and install build tools
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip setuptools wheel psutil
+          python -m pip install --upgrade pip setuptools wheel psutil -v
+          pip list
 
       - name: Build and install gfootball
         shell: pwsh
         env:
           VCPKG_ROOT: C:\vcpkg
         run: |
-          python -m pip install .
+          Write-Host "::group::pip install . (verbose)"
+          python -m pip install . -v 2>&1 | Tee-Object -FilePath build.log
+          $exitCode = $LASTEXITCODE
+          Write-Host "::endgroup::"
+          Write-Host "Build exit code: $exitCode"
+          if ($exitCode -ne 0) {
+            Write-Host "::error::Build failed with exit code $exitCode"
+            Write-Host "=== Last 100 lines of build log ==="
+            Get-Content build.log | Select-Object -Last 100
+            exit $exitCode
+          }
 
       - name: Verify gfootball installation
         shell: pwsh
         run: |
+          Write-Host "=== Installed packages ==="
+          pip list
+          Write-Host "=== Import test ==="
           python -c "import gfootball; print('gfootball imported successfully')"
+          python -c "import gymnasium; print(f'gymnasium version: {gymnasium.__version__}')"
+          python -c "import gfootball_engine; print('gfootball_engine imported successfully')"
 
       - name: Install PyInstaller and runtime dependencies
         shell: pwsh
         run: |
-          python -m pip install pyinstaller pygame opencv-python numpy absl-py six "gym<=0.21.0" cloudpickle
+          python -m pip install pyinstaller pygame opencv-python numpy absl-py six "gymnasium>=0.26.0" cloudpickle -v
+          Write-Host "=== Final package list ==="
+          pip list
 
       - name: Create launcher script
         shell: pwsh
@@ -78,10 +117,10 @@ jobs:
                       write_full_episode_dumps=False, write_goal_dumps=False)
                   print("Google Research Football")
                   print("Controls: Arrows=Move, S=Pass, D=Shoot, E=Sprint, Ctrl+C=Quit")
-                  obs = env.reset()
+                  obs, info = env.reset()
                   while True:
-                      obs, reward, done, info = env.step(0)
-                      if done: obs = env.reset()
+                      obs, reward, terminated, truncated, info = env.step(0)
+                      if terminated or truncated: obs, info = env.reset()
               except KeyboardInterrupt: print("\nGame ended")
               except Exception as e:
                   print(f"Error: {e}")
@@ -102,19 +141,34 @@ jobs:
       - name: Build with PyInstaller
         shell: pwsh
         run: |
-          pyinstaller gfootball.spec --clean --noconfirm
+          Write-Host "::group::PyInstaller build"
+          pyinstaller gfootball.spec --clean --noconfirm --log-level=DEBUG 2>&1 | Tee-Object -FilePath pyinstaller.log
+          Write-Host "::endgroup::"
+          if (Test-Path "dist\gfootball\GFootball.exe") {
+            Write-Host "Build successful: dist\gfootball\GFootball.exe"
+            Get-Item "dist\gfootball\GFootball.exe" | Format-List Name,Length,LastWriteTime
+          } else {
+            Write-Host "::error::PyInstaller output executable not found"
+            Write-Host "=== Last 50 lines of pyinstaller log ==="
+            Get-Content pyinstaller.log | Select-Object -Last 50
+          }
 
       - name: Copy data files
         shell: pwsh
         run: |
           $enginePath = (python -c "import gfootball_engine; import os; print(os.path.dirname(gfootball_engine.__file__))").Trim()
+          Write-Host "Engine path: $enginePath"
           if (Test-Path "dist\gfootball") {
             if (-not (Test-Path "dist\gfootball\gfootball_engine\data")) {
+              Write-Host "Copying data files..."
               Copy-Item -Path "$enginePath\data" -Destination "dist\gfootball\gfootball_engine\data" -Recurse -Force
             }
             if (-not (Test-Path "dist\gfootball\gfootball_engine\fonts")) {
+              Write-Host "Copying font files..."
               Copy-Item -Path "$enginePath\fonts" -Destination "dist\gfootball\gfootball_engine\fonts" -Recurse -Force
             }
+            Write-Host "=== dist\gfootball contents ==="
+            Get-ChildItem "dist\gfootball" -Recurse | Measure-Object -Property Length -Sum | ForEach-Object { Write-Host "Total files: $($_.Count), Total size: $([math]::Round($_.Sum / 1MB, 2)) MB" }
           }
 
       - name: Install NSIS
@@ -163,7 +217,7 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path "dist\gfootball") {
-            & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+            & "C:\Program Files (x86)\NSIS\makensis.exe" /V4 installer.nsi
           }
         continue-on-error: true
 
@@ -172,8 +226,19 @@ jobs:
         run: |
           if (Test-Path "dist\gfootball") {
             Compress-Archive -Path "dist\gfootball\*" -DestinationPath "GFootball_Portable.zip"
+            Get-Item "GFootball_Portable.zip" | Format-List Name,Length
           }
         continue-on-error: true
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            pyinstaller.log
+          if-no-files-found: ignore
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

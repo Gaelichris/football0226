@@ -62,12 +62,12 @@ def compute_hash(env, actions):
   Returns:
     hash
   """
-  o = env.reset()
+  o, _ = env.reset()
   hash_value = observation_hash(o)
   done = False
   step = 0
   while not done:
-    o, _, done, _ = env.step(step % actions)
+    o, _, done, _, _ = env.step(step % actions)
     hash_value = observation_hash(o, hash_value)
     step += 1
     if step >= 200:
@@ -79,7 +79,7 @@ def run_scenario(cfg, queue, actions, render=False, validation=True):
   env = football_env.FootballEnv(cfg)
   if render:
     env.render()
-  obs = env.reset()
+  obs, _ = env.reset()
   queue.put(obs)
   if validation:
     # Otherwise the following error is generated on Windows:
@@ -102,9 +102,9 @@ def run_scenario(cfg, queue, actions, render=False, validation=True):
         break
     step += 1
     if isinstance(action, Iterable):
-      obs, _, done, _ = env.step(action)
+      obs, _, done, _, _ = env.step(action)
     else:
-      obs, _, done, _ = env.step([action, action])
+      obs, _, done, _, _ = env.step([action, action])
     queue.put(obs)
   queue.put(None)
   env.close()
@@ -153,7 +153,7 @@ class FootballEnvTest(parameterized.TestCase):
         representation='simple115v2',
         number_of_left_players_agent_controls=11,
         number_of_right_players_agent_controls=11)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertLen(obs, 22)
     self.assertIn(obs, env.observation_space)
 
@@ -162,7 +162,7 @@ class FootballEnvTest(parameterized.TestCase):
         rewards='checkpoints,scoring',
         number_of_left_players_agent_controls=11,
         number_of_right_players_agent_controls=0)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertLen(obs, 11)
     self.assertIn(obs, env.observation_space)
 
@@ -172,7 +172,7 @@ class FootballEnvTest(parameterized.TestCase):
         representation='simple115v2',
         number_of_left_players_agent_controls=0,
         number_of_right_players_agent_controls=11)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertLen(obs, 11)
     self.assertIn(obs, env.observation_space)
 
@@ -181,7 +181,7 @@ class FootballEnvTest(parameterized.TestCase):
         rewards='checkpoints,scoring',
         number_of_left_players_agent_controls=1,
         number_of_right_players_agent_controls=1)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertLen(obs, 2)
     self.assertIn(obs, env.observation_space)
 
@@ -189,10 +189,10 @@ class FootballEnvTest(parameterized.TestCase):
         env_name='tests.multiagent_wrapper',
         rewards='checkpoints,scoring',
         number_of_left_players_agent_controls=1)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertEqual(np.shape(obs), (72, 96, 4))
     self.assertIn(obs, env.observation_space)
-    obs, _, _, _ = env.step([football_action_set.action_left])
+    obs, _, _, _, _ = env.step([football_action_set.action_left])
     self.assertEqual(np.shape(obs), (72, 96, 4))
     env = gfootball.env.create_environment(
         env_name='tests.multiagent_wrapper',
@@ -200,13 +200,13 @@ class FootballEnvTest(parameterized.TestCase):
         representation='raw',
         number_of_left_players_agent_controls=1,
         number_of_right_players_agent_controls=1)
-    obs = env.reset()
+    obs, _ = env.reset()
     self.assertLen(obs, 2)
     self.assertEqual(obs[0]['sticky_actions'][0], 0)
     self.assertEqual(obs[1]['sticky_actions'][4], 0)
-    obs, _, _, _ = env.step(
+    obs, _, _, _, _ = env.step(
         [football_action_set.action_idle, football_action_set.action_idle])
-    obs, _, _, _ = env.step(
+    obs, _, _, _, _ = env.step(
         [football_action_set.action_left, football_action_set.action_right])
     self.assertLen(obs, 2)
     self.assertEqual(obs[0]['sticky_actions'][0], 1)
@@ -218,9 +218,10 @@ class FootballEnvTest(parameterized.TestCase):
 
     env = football_env.FootballEnv(cfg)
     cfg['level'] = 'academy_empty_goal'
-    last_o = env.reset()[0]
+    obs, _ = env.reset()
+    last_o = obs[0]
     for _ in range(120):
-      o, reward, done, _ = env.step(football_action_set.action_right)
+      o, reward, done, _, _ = env.step(football_action_set.action_right)
       o = o[0]
       if done:
         self.assertEqual(reward, 1)
@@ -240,12 +241,12 @@ class FootballEnvTest(parameterized.TestCase):
     cfg['level'] = 'tests.second_half'
     env = football_env.FootballEnv(cfg)
     for _ in range(5):
-      o, _, done, _ = env.step(football_action_set.action_idle)
+      o, _, done, _, _ = env.step(football_action_set.action_idle)
       self.assertFalse(done)
       self.assertAlmostEqual(o[0]['left_team'][o[0]['active']][0], 0, delta=0.1)
     for _ in range(6):
       self.assertFalse(done)
-      o, _, done, _ = env.step(football_action_set.action_idle)
+      o, _, done, _, _ = env.step(football_action_set.action_idle)
       self.assertAlmostEqual(
           o[0]['left_team'][o[0]['active']][0], -0.5, delta=0.1)
     self.assertTrue(done)
@@ -261,10 +262,10 @@ class FootballEnvTest(parameterized.TestCase):
     })
     env = football_env.FootballEnv(cfg)
     env.render()
-    o = env.reset()
+    o, _ = env.reset()
     hash_value = observation_hash(o)
     for _ in range(10):
-      o, _, _, _ = env.step(football_action_set.action_right)
+      o, _, _, _, _ = env.step(football_action_set.action_right)
       hash_value = observation_hash(o, hash_value)
     # Linux
     expected_hash_value = 4000732293
@@ -291,14 +292,14 @@ class FootballEnvTest(parameterized.TestCase):
         'level': 'tests.11_vs_11_hard_deterministic',
     })
     env = football_env.FootballEnv(cfg)
-    o = env.reset()
+    o, _ = env.reset()
     for _ in range(10):
-      o, _, _, _ = env.step(football_action_set.action_right)
+      o, _, _, _, _ = env.step(football_action_set.action_right)
       self.assertNotIn('frame', o[0])
       env.render()
       self.assertIn('frame', env.observation()[0])
       self.compare_observations(o, env.observation())
-      o, _, _, _ = env.step(football_action_set.action_right)
+      o, _, _, _, _ = env.step(football_action_set.action_right)
       self.assertIn('frame', env.observation()[0])
       env.disable_render()
       self.compare_observations(o, env.observation())
@@ -381,7 +382,7 @@ class FootballEnvTest(parameterized.TestCase):
     env.reset()
     initial_memory = self.memory_usage()
     for _ in range(100):
-      _, _, _, _ = env.step(football_action_set.action_right)
+      _, _, _, _, _ = env.step(football_action_set.action_right)
     memory_usage = self.memory_usage() - initial_memory
     env.close()
     self.assertGreaterEqual(10000000, memory_usage)
@@ -421,15 +422,15 @@ class FootballEnvTest(parameterized.TestCase):
     })
     env1 = football_env.FootballEnv(cfg1)
     env2 = football_env.FootballEnv(cfg2)
-    initial_obs = env1.reset()
+    initial_obs, _ = env1.reset()
     env2.reset()
     initial_state = env1.get_state()
     env2.set_state(initial_state)
     random.seed(seed)
     actions = len(football_action_set.get_action_set(cfg1))
     first_action = random.randint(0, actions - 1)
-    first_obs, _, _, _ = env1.step(first_action)
-    _, _, _, _ = env2.step(first_action)
+    first_obs, _, _, _, _ = env1.step(first_action)
+    _, _, _, _, _ = env2.step(first_action)
     step = 0
     limit = 10 if fast_run else 3000
     while step < limit:
@@ -442,8 +443,8 @@ class FootballEnvTest(parameterized.TestCase):
         self.compare_observations(first_obs, env2.observation())
         env2.set_state(env1.get_state())
       self.compare_observations(env1.observation(), env2.observation())
-      _, _, done1, _ = env1.step(action)
-      _, _, done2, _ = env2.step(action)
+      _, _, done1, _, _ = env1.step(action)
+      _, _, done2, _, _ = env2.step(action)
       self.assertEqual(done1, done2)
       if done1:
         break
@@ -499,10 +500,10 @@ class FootballEnvTest(parameterized.TestCase):
     })
     env = football_env.FootballEnv(cfg)
     env.reset()
-    o, _, done, _ = env.step(football_action_set.action_long_pass)
+    o, _, done, _, _ = env.step(football_action_set.action_long_pass)
     done = False
     while not done and o[0]['right_team'][1][0] == 0:
-      o, _, done, _ = env.step(football_action_set.action_idle)
+      o, _, done, _, _ = env.step(football_action_set.action_idle)
     self.assertAlmostEqual(o[0]['ball'][0], 0.6, delta=0.4)
     self.assertAlmostEqual(o[0]['right_team'][0][0], 0.6, delta=0.4)
     self.assertAlmostEqual(o[0]['right_team'][1][0], 0.6, delta=0.4)
@@ -520,10 +521,10 @@ class FootballEnvTest(parameterized.TestCase):
         'reverse_team_processing': reverse,
     })
     env = football_env.FootballEnv(cfg)
-    o = env.reset()
+    o, _ = env.reset()
     done = False
     while not done:
-      o, _, done, _ = env.step([football_action_set.action_left,
+      o, _, done, _, _ = env.step([football_action_set.action_left,
                                 football_action_set.action_left])
     self.assertAlmostEqual(o[0]['ball'][0], -0.95 * factor, delta=0.1)
     self.assertAlmostEqual(o[0]['ball'][1], 0.4 * factor, delta=0.1)
@@ -539,10 +540,10 @@ class FootballEnvTest(parameterized.TestCase):
         'players': ['agent:left_players=1'],
     })
     env = football_env.FootballEnv(cfg)
-    o = env.reset()
+    o, _ = env.reset()
     done = False
     while not done:
-      o, _, done, _ = env.step([football_action_set.action_sliding])
+      o, _, done, _, _ = env.step([football_action_set.action_sliding])
     self.assertAlmostEqual(o[0]['ball'][0], -0.809, delta=0.01)
     self.assertAlmostEqual(o[0]['ball'][1], 0.0, delta=0.01)
     self.assertAlmostEqual(o[0]['right_team'][0][0], 1, delta=0.1)
@@ -561,10 +562,10 @@ class FootballEnvTest(parameterized.TestCase):
         'reverse_team_processing': reverse,
     })
     env = football_env.FootballEnv(cfg)
-    o = env.reset()
+    o, _ = env.reset()
     done = False
     while not done:
-      o, _, done, _ = env.step([football_action_set.action_right,
+      o, _, done, _, _ = env.step([football_action_set.action_right,
                                 football_action_set.action_right])
     self.assertAlmostEqual(o[0]['ball'][0], -1.0 * factor, delta=0.1)
     self.assertAlmostEqual(o[0]['ball'][1], 0.0, delta=0.1)
@@ -583,10 +584,10 @@ class FootballEnvTest(parameterized.TestCase):
         'reverse_team_processing': reverse,
     })
     env = football_env.FootballEnv(cfg)
-    o = env.reset()
+    o, _ = env.reset()
     done = False
     while not done:
-      o, _, done, _ = env.step(
+      o, _, done, _, _ = env.step(
           [football_action_set.action_right, football_action_set.action_right])
     self.assertAlmostEqual(o[0]['ball'][0], 0.0, delta=0.1)
     self.assertEqual(o[0]['score'][episode], 1)
@@ -637,12 +638,12 @@ class FootballEnvTest(parameterized.TestCase):
         stacked=True,
         env_name='academy_empty_goal',
         rewards='checkpoints,scoring')
-    o = env.reset()
+    o, _ = env.reset()
     state = env.get_state()
     reward1 = 0
     hash1 = 0
     while reward1 < 0.9:
-      o, r, _, _ = env.step(football_action_set.action_right)
+      o, r, _, _, _ = env.step(football_action_set.action_right)
       reward1 += r
       hash1 = zlib.adler32(o, hash1)
     self.assertAlmostEqual(reward1, 0.9, delta=0.01)
@@ -650,7 +651,7 @@ class FootballEnvTest(parameterized.TestCase):
     hash2 = 0
     reward2 = 0
     while reward2 < 0.9:
-      o, r, _, _ = env.step(football_action_set.action_right)
+      o, r, _, _, _ = env.step(football_action_set.action_right)
       reward2 += r
       hash2 = zlib.adler32(o, hash2)
     self.assertAlmostEqual(reward2, 0.9, delta=0.01)
@@ -661,7 +662,7 @@ class FootballEnvTest(parameterized.TestCase):
         'level': '11_vs_11_competition',
     })
     env = football_env.FootballEnv(cfg)
-    obs = env.reset()
+    obs, _ = env.reset()
     state = env.get_state()
     env.reset()
     env.set_state(state)
@@ -681,7 +682,7 @@ class FootballEnvTest(parameterized.TestCase):
     # Go right until reaching the goal.
     done = False
     while not done:
-      _, _, done, _ = env.step(5)
+      _, _, done, _, _ = env.step(5)
     env.set_state(state)
     env.step(0)  # Test if can take step
 

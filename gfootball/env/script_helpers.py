@@ -121,7 +121,7 @@ class ScriptHelpers(object):
     done = False
     try:
       while not done:
-        _, _, done, _ = env.step([])
+        _, _, done, _, _ = env.step([])
     except KeyboardInterrupt:
       env.write_dump('shutdown')
       exit(1)
