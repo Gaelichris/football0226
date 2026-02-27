@@ -61,7 +61,7 @@ jobs:
       - name: Upgrade pip and install build tools
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip setuptools wheel psutil -v
+          python -m pip install --upgrade pip setuptools wheel psutil numpy
           pip list
 
       - name: Build and install gfootball
@@ -69,16 +69,15 @@ jobs:
         env:
           VCPKG_ROOT: C:\vcpkg
         run: |
-          Write-Host "::group::pip install . (verbose)"
-          python -m pip install . -v 2>&1 | Tee-Object -FilePath build.log
-          $exitCode = $LASTEXITCODE
-          Write-Host "::endgroup::"
-          Write-Host "Build exit code: $exitCode"
-          if ($exitCode -ne 0) {
-            Write-Host "::error::Build failed with exit code $exitCode"
-            Write-Host "=== Last 100 lines of build log ==="
-            Get-Content build.log | Select-Object -Last 100
-            exit $exitCode
+          Write-Host "=== Environment check ==="
+          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT"
+          Write-Host "Python arch: $(python -c 'import struct; print(struct.calcsize(\"P\")*8)')-bit"
+          Write-Host ""
+          Write-Host "=== Starting build (no-build-isolation to see CMake output) ==="
+          python -m pip install . --no-build-isolation -v
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
           }
 
       - name: Verify gfootball installation
@@ -238,6 +237,7 @@ jobs:
           path: |
             build.log
             pyinstaller.log
+            third_party/gfootball_engine/build_win/**/*.log
           if-no-files-found: ignore
 
       - name: Upload artifacts
