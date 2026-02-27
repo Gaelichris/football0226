@@ -85,13 +85,13 @@ def main(unused_argv):
       representation='extracted', stacked=True,
       include_rendering=FLAGS.render)
   for _ in range(FLAGS.how_many):
-    ob = env.reset()
+    ob, _ = env.reset()
     cnt = 1
     done = False
     while not done:
       try:
         action = model(ob)
-        ob, rew, done, _ = env.step(action)
+        ob, rew, done, _, _ = env.step(action)
         logging.info('Playing the game, step %d, action %s, rew %s, done %d',
                      cnt, action, rew, done)
         cnt += 1

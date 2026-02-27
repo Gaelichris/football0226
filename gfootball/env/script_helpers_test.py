@@ -55,7 +55,7 @@ class ScriptHelpersTest(absltest.TestCase):
     while not done:
       step += 1
       actions = [(step + x) % actions_cnt for x in range(left_players)]
-      _, _, done, _ = env.step(actions)
+      _, _, done, _, _ = env.step(actions)
     env.close()
 
   def compute_hash(self, trace_file):

@@ -21,7 +21,7 @@ from __future__ import print_function
 
 import unittest
 
-import gym
+import gymnasium as gym
 from absl.testing import parameterized
 
 
@@ -35,8 +35,8 @@ class GymTest(parameterized.TestCase):
                      stacked=True, rewards=rewards)
       env.reset()
       for _ in range(10):
-        _, _, done, _ = env.step(env.action_space.sample())
-        if done:
+        _, _, terminated, truncated, _ = env.step(env.action_space.sample())
+        if terminated or truncated:
           env.reset()
       env.close()
 

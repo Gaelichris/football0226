@@ -23,7 +23,7 @@ import collections
 import cv2
 from gfootball.env import football_action_set
 from gfootball.env import observation_preprocessing
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -77,7 +77,7 @@ class PeriodicDumpWriter(gym.Wrapper):
   def step(self, action):
     return self.env.step(action)
 
-  def reset(self):
+  def reset(self, **kwargs):
     if (self._dump_frequency > 0 and
         (self._current_episode_number % self._dump_frequency == 0)):
       self.env._config.update(self._original_dump_config)
@@ -90,7 +90,7 @@ class PeriodicDumpWriter(gym.Wrapper):
       if self._render:
         self.env.disable_render()
     self._current_episode_number += 1
-    return self.env.reset()
+    return self.env.reset(**kwargs)
 
 
 class Simple115StateWrapper(gym.ObservationWrapper):
@@ -281,9 +281,9 @@ class CheckpointRewardWrapper(gym.RewardWrapper):
     self._num_checkpoints = 10
     self._checkpoint_reward = 0.1
 
-  def reset(self):
+  def reset(self, **kwargs):
     self._collected_checkpoints = {}
-    return self.env.reset()
+    return self.env.reset(**kwargs)
 
   def get_state(self, to_pickle):
     to_pickle['CheckpointRewardWrapper'] = self._collected_checkpoints
@@ -349,10 +349,10 @@ class FrameStack(gym.Wrapper):
     self.observation_space = gym.spaces.Box(
         low=low, high=high, dtype=env.observation_space.dtype)
 
-  def reset(self):
-    observation = self.env.reset()
+  def reset(self, **kwargs):
+    observation, info = self.env.reset(**kwargs)
     self.obs.extend([observation] * self.obs.maxlen)
-    return self._get_observation()
+    return self._get_observation(), info
 
   def get_state(self, to_pickle):
     to_pickle['FrameStack'] = self.obs
@@ -364,9 +364,9 @@ class FrameStack(gym.Wrapper):
     return from_pickle
 
   def step(self, action):
-    observation, reward, done, info = self.env.step(action)
+    observation, reward, terminated, truncated, info = self.env.step(action)
     self.obs.append(observation)
-    return self._get_observation(), reward, done, info
+    return self._get_observation(), reward, terminated, truncated, info
 
   def _get_observation(self):
     return np.concatenate(list(self.obs), axis=-1)
@@ -401,15 +401,15 @@ class MultiAgentToSingleAgent(gym.Wrapper):
     else:
       self.action_space = gym.spaces.Discrete(env._num_actions)
 
-  def reset(self):
-    self._observation = self.env.reset()
-    return self._get_observation()
+  def reset(self, **kwargs):
+    self._observation, info = self.env.reset(**kwargs)
+    return self._get_observation(), info
 
   def step(self, action):
     assert self._observation, 'Reset must be called before step'
     action = MultiAgentToSingleAgent.get_action(action, self._observation)
-    self._observation, reward, done, info = self.env.step(action)
-    return self._get_observation(), reward, done, info
+    self._observation, reward, terminated, truncated, info = self.env.step(action)
+    return self._get_observation(), reward, terminated, truncated, info
 
   def _get_observation(self):
     return MultiAgentToSingleAgent.get_observation(self._observation)

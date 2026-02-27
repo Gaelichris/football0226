@@ -24,7 +24,7 @@ import tempfile
 
 import argparse
 import gfootball.env as football_env
-import gym
+import gymnasium as gym
 import ray
 from ray import tune
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
@@ -56,21 +56,21 @@ class RllibGFootball(MultiAgentEnv):
         dtype=self.env.observation_space.dtype)
     self.num_agents = num_agents
 
-  def reset(self):
-    original_obs = self.env.reset()
+  def reset(self, **kwargs):
+    original_obs, info = self.env.reset(**kwargs)
     obs = {}
     for x in range(self.num_agents):
       if self.num_agents > 1:
         obs['agent_%d' % x] = original_obs[x]
       else:
         obs['agent_%d' % x] = original_obs
-    return obs
+    return obs, info
 
   def step(self, action_dict):
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
-    o, r, d, i = self.env.step(actions)
+    o, r, terminated, truncated, i = self.env.step(actions)
     rewards = {}
     obs = {}
     infos = {}
@@ -82,8 +82,9 @@ class RllibGFootball(MultiAgentEnv):
       else:
         rewards[key] = r
         obs[key] = o
-    dones = {'__all__': d}
-    return obs, rewards, dones, infos
+    terminateds = {'__all__': terminated}
+    truncateds = {'__all__': truncated}
+    return obs, rewards, terminateds, truncateds, infos
 
 
 if __name__ == '__main__':
