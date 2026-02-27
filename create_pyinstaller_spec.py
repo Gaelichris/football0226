@@ -38,7 +38,7 @@ a = Analysis(
         'gfootball.env.constants', 'gfootball.env.observation_preprocessing',
         'gfootball.env.observation_processor', 'gfootball.env.scenario_builder',
         'gfootball.env.wrappers', 'gfootball.env.players',
-        'gfootball.scenarios', 'pygame', 'cv2', 'numpy', 'gym',
+        'gfootball.scenarios', 'pygame', 'cv2', 'numpy', 'gymnasium',
         'psutil', 'six', 'absl', 'cloudpickle',
     ],
     hookspath=[],

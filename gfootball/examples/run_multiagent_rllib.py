@@ -24,7 +24,7 @@ import tempfile
 
 import argparse
 import gfootball.env as football_env
-import gym
+import gymnasium as gym
 import ray
 from ray import tune
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
@@ -57,7 +57,7 @@ class RllibGFootball(MultiAgentEnv):
     self.num_agents = num_agents
 
   def reset(self):
-    original_obs = self.env.reset()
+    original_obs, _ = self.env.reset()
     obs = {}
     for x in range(self.num_agents):
       if self.num_agents > 1:
@@ -70,7 +70,7 @@ class RllibGFootball(MultiAgentEnv):
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
-    o, r, d, i = self.env.step(actions)
+    o, r, d, _, i = self.env.step(actions)
     rewards = {}
     obs = {}
     infos = {}

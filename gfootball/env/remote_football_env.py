@@ -26,7 +26,7 @@ from gfootball.eval_server.proto import game_server_pb2_grpc
 from gfootball.eval_server.proto import master_pb2
 from gfootball.eval_server.proto import master_pb2_grpc
 import grpc
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -118,7 +118,7 @@ class RemoteFootballEnv(gym.Env):
     get_env_result_request = game_server_pb2.GetEnvResultRequest(
         game_version=config.game_version, game_id=self._game_id,
         username=self._username, token=self._token, model_name=self._model_name)
-    return self._get_env_result(get_env_result_request, 'GetEnvResult')[0]
+    return self._get_env_result(get_env_result_request, 'GetEnvResult')[0], {}
 
   def _reset_with_retries(self, request):
     time_to_sleep = 1
@@ -174,7 +174,7 @@ class RemoteFootballEnv(gym.Env):
 
     env_result = pickle.loads(response.env_result)
     self._process_env_result(env_result)
-    return env_result[0], env_result[1], env_result[2], env_result[3]
+    return env_result[0], env_result[1], env_result[2], False, env_result[3]
 
   def _process_env_result(self, env_result):
     ob, rew, done, info = env_result
